@@ -10,6 +10,7 @@ The code also uses elements from some other micropython projects, including:
 - Dan Perron's PicoAudioPWM https://github.com/danjperron/PicoAudioPWM
 - Joeky Zhan's awesome micropython lib https://github.com/joeky888/awesome-micropython-lib/tree/master/Audio
 
+Parts for sample board
 - 1 x Raspberry Pi Pico
 - 1 x Raspberry Pi screen, the code is based around the Waveshare 1.8" LCD Display
 - 1 x Audio Socket
