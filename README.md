@@ -24,4 +24,5 @@ The code also uses elements from some other micropython projects, including:
 1 x variable resistor
 
 === VERSION 0.1 2023-10-04 ===
+
 Simple interface, list of WAV files from an SD card. Up, Down button to choose, Select button to select. The next screen allows the WAV file to be played using the select button, the back button will stop the wav, if the wav is stopped the back button will return to the menu.
