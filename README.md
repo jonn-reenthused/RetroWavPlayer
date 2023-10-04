@@ -7,8 +7,8 @@ The project includes the code in Micropython format and a sample board design, a
 
 The code also uses elements from some other micropython projects, including:
 
-. Dan Perron's PicoAudioPWM https://github.com/danjperron/PicoAudioPWM
-. Joeky Zhan's awesome micropython lib https://github.com/joeky888/awesome-micropython-lib/tree/master/Audio
+- Dan Perron's PicoAudioPWM https://github.com/danjperron/PicoAudioPWM
+- Joeky Zhan's awesome micropython lib https://github.com/joeky888/awesome-micropython-lib/tree/master/Audio
 
 1 x Raspberry Pi Pico
 1 x Raspberry Pi screen, the code is based around the Waveshare 1.8" LCD Display
