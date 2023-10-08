@@ -8,6 +8,9 @@ import wave
 import sdcard
 import machine
 
+# Retro Wave Player
+# 2023 RE:Enthused
+
 IS_DEMO = False
 DEFPATH="sd"
 BL = 13
