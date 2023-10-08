@@ -27,6 +27,7 @@ BACKIO = 4
 AUDIOLEFT = 20
 AUDIORIGHT = 21
 AUDIOGND = 22
+VERSION="0.1a"
 
 upButton = ""
 downButton = ""
@@ -44,6 +45,8 @@ fileSeconds = 0.0
 hasSDCard = False
 player = None
 currentMode = 0
+selectDeBounce = False
+backDeBounce = False
 
 SCREEN_WIDTH = 160
 SCREEN_HEIGHT = 128
@@ -187,7 +190,7 @@ class LCD_1inch8(framebuf.FrameBuffer):
         self.write_cmd(0xF6); #Disable ram power save mode
         self.write_data(0x00);
 
-            #sleep out
+        #sleep out
         self.write_cmd(0x11);
         #DEV_Delay_ms(120);
 
@@ -224,7 +227,6 @@ def loadFileList(waveFolder):
     fileArray.clear()
 
     # get a list of .wav files
-    print(waveFolder)
     for k in os.ilistdir(waveFolder):
         i = k[0]
         if is_hidden(i) == False:
@@ -242,6 +244,8 @@ def loadWAV(filename):
     f.close()
 
 def showWavStatus():
+    global playMode
+    
     LCD.fill(LCD.WHITE)
     
     # Status Text
@@ -265,12 +269,12 @@ def showWavStatus():
 
     
     # Progress Bar
-    segment = int((SCREEN_WIDTH / 10) - 2)
+    #segment = int((SCREEN_WIDTH / 10) - 2)
     
-    LCD.rect(4, SCREEN_HEIGHT - (segment + 6), SCREEN_WIDTH - 7, segment + 4, LCD.BLUE)
+    #LCD.rect(4, SCREEN_HEIGHT - (segment + 6), SCREEN_WIDTH - 7, segment + 4, LCD.BLUE)
     
-    for i in range(0, currentPerc):
-        LCD.fill_rect((i * (segment + 1)) + 6, SCREEN_HEIGHT - (segment + 4), segment, segment, LCD.BLUE)
+    #for i in range(0, currentPerc):
+    #    LCD.fill_rect((i * (segment + 1)) + 6, SCREEN_HEIGHT - (segment + 4), segment, segment, LCD.BLUE)
     
     LCD.show()
 
@@ -284,6 +288,16 @@ def printText(text, x, y, inverted):
         putText(text, x, y + 8, LCD.WHITE)
     else:
         putText(text, x, y + 8, LCD.BLACK)
+
+def showIntro():
+    global VERSION
+    
+    putText("Retro Wave Player",8,8,LCD.BLUE)
+    putText("Version: "+VERSION,8,24,LCD.BLUE)
+    putText("2023 RE:Enthused",8,40,LCD.BLACK)
+    putText("Finding Files",8,70,LCD.RED) 
+    LCD.show()
+    time.sleep(2)
 
 def sdcardInit():
     hasSucceeded = False
@@ -309,13 +323,14 @@ def sdcardInit():
         hasSucceeded = True
     except Exception as error:
         hasSucceeded = False
-        print(error)
     
     return hasSucceeded
 
 def displayFileList(offset, maxOffset, fileArray, currentIndex):
     index = 0
     
+    LCD.fill(LCD.WHITE)
+
     if len(fileArray) == 0:
         printText("no files found", 8, 8, False)
     
@@ -346,22 +361,30 @@ def displayFileList(offset, maxOffset, fileArray, currentIndex):
         index = index + 1
 
 def stopWAV():
-    global currentMode
+    global playMode
     
-    if currentMode == 1:
+    if playMode == 1:
         player.stop()
-        currentMode = 0
+        playMode = 0
 
 def playWAV():
-    global currentMode
     global hasDisplayedWave
+    global currentFile
+    global playMode
     
     if hasDisplayedWave == False:
         return
     
-    currentMode = 1
-    player.play(currentFile)    
-
+    playMode = 1
+    showWavStatus()
+    time.sleep(1)
+    
+    try:
+        player.play(currentFile)
+        stopWAV()
+    except KeyboardInterrupt:
+        stopWAV()
+    
 def processButtons():
     global upButton
     global downButton
@@ -369,30 +392,44 @@ def processButtons():
     global backButton
     global currentScreen
     global currentIndex
+    global currentMode
+    global currentFile
+    global hasDisplayedWave
+    global selectDeBounce
+    global playMode
 
     if upButton.value() == 0:
         if currentScreen == 0:
             currentIndex = currentIndex - 1
+            return True
     elif downButton.value() == 0:
         if currentScreen == 0:
             currentIndex = currentIndex + 1
+            return True
     elif selectButton.value() == 0:
-        if currentScreen == 0:
-            currentFile = fileArray[currentIndex]
-            hasDisplayedWave = False
-            currentMode = 0
-            currentScreen = 1
-        elif currentScreen == 1:
-            if currentMode == 0:
-                playWAV()
-                currentMode = 1
+        if selectDeBounce == False:
+            selectDeBounce = True
+            if currentScreen == 0:
+                currentFile = fileArray[currentIndex]
+                hasDisplayedWave = False
+                currentMode = 0
+                currentScreen = 1
+            elif currentScreen == 1:
+                if currentMode == 0 and hasDisplayedWave:
+                    playWAV()
     elif backButton.value() == 0:
         if currentScreen == 1:
-            if currentMode == 0:
+            if playMode == 0:
                 currentScreen = 0
+                return True
             else:
                 stopWAV()
-                currentMode = 0
+                playMode = 0
+
+    if selectButton.value() == 1:
+        selectDeBounce = False
+
+    return False
 
 def get_config_default(file):
     global BL
@@ -460,11 +497,20 @@ def get_config_default(file):
             json.dump(config, fd)
             return config
 
+def processBackButton(pin):
+    global playMode
+    global currentScreen
+    
+    if currentScreen == 1:
+        if playMode == 1:
+            stopWAV()
+
 if __name__=='__main__':
     # Initialise Starting Conditions
     currentScreen = 0
     shouldReloadFiles = False
-    
+    shouldDisplayFiles = True
+
     hasSDCard = sdcardInit()
     
     if IS_DEMO:
@@ -492,24 +538,27 @@ if __name__=='__main__':
     selectButton = Pin(SELECTIO, mode=Pin.IN, pull=Pin.PULL_UP)
     backButton = Pin(BACKIO, mode=Pin.IN, pull=Pin.PULL_UP)
 
+    backButton.irq(trigger=Pin.IRQ_FALLING, handler=processBackButton)
+
     LCD = LCD_1inch8()
     #color BRG
     LCD.fill(LCD.WHITE)
- 
-    LCD.show()
+    showIntro() 
 
     forward = True
     
     try:
         while True:
-            processButtons()
+            shouldDisplayFiles = processButtons()
             if shouldReloadFiles:
                 loadFileList(currentPath)
                 shouldReloadFiles = False
+                shouldDisplayFiles = True
                 
             if hasSDCard == False:
                 hasSDCard = sdcardInit()
                 if hasSDCard == False:
+                    LCD.fill(LCD.WHITE)
                     printText("no sd card", 8, 8, False)
                     LCD.show()
                     time.sleep(2)
@@ -520,11 +569,13 @@ if __name__=='__main__':
             elif currentScreen == 0:
                 if len(fileArray) == 0:
                     shouldReloadFiles = True
-                    
-                displayFileList(offset, maxOffset, fileArray, currentIndex)
-                LCD.show()
-                time.sleep(0.5)
-                LCD.fill(0xFFFF)
+                
+                if shouldDisplayFiles:
+                    displayFileList(offset, maxOffset, fileArray, currentIndex)
+                    shouldDisplayFiles = False
+                    LCD.show()
+                    time.sleep(0.5)
+                    LCD.fill(0xFFFF)
             elif currentScreen == 1:
                 showWavStatus()
                 currentPerc = currentPerc + 1
