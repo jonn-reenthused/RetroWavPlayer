@@ -238,27 +238,30 @@ def loadFileList(waveFolder):
     fileArray.clear()
 
     # get a list of .wav files
-    files = os.ilistdir(waveFolder)
+    files = os.ilistdir()
     
     for k in files:
         i = k[0]
-        print(i)
         if is_hidden(i) == False:
             if k[1] & 0x4000: # Directory
-                fileArray.append("[DIR] "+i)
+                fileArray.append(".[DIR] "+i)
             elif i.upper().find(".WAV") >= 0 and is_hidden(i) == False:
                 fileArray.append(i)
 
     fileArray.sort()
+    
+    if len(fileArray) == 0:
+        fileArray.append("no files found")
 
 def changeDirectory(directoryName):
     global currentPath
     global currentScreen
     global shouldReloadFiles
     
-    directory = directoryName[5:].strip()
+    directory = directoryName[6:].strip()
     currentPath = currentPath+ "/" + directory
-    print(currentPath)
+    
+    os.chdir(directory)
     
     shouldReloadFiles = True
     
@@ -266,7 +269,7 @@ def changeDirectory(directoryName):
 
 def checkSelection(filename):
     # Check we aren't loading a directory
-    if filename[0:5] == "[DIR]":
+    if filename[0:6] == ".[DIR]":
         return False
     else:
         return True
@@ -276,12 +279,17 @@ def loadWAV(filename):
     global playMode
         
     try:
-        f = wave.open(filename,'rb')
+        print(filename)
+        fp = open(filename, 'rb')
+        
+        f = wave.open(fp,'rb')
         fileSeconds = (f.getnframes() / f.getframerate())
         f.close()
-    except:
+        playMode = 0
+    except Exception as error:
         playMode = 2
         showWavStatus()
+        print(error)
 
 def showWavStatus():
     global playMode
@@ -374,8 +382,10 @@ def displayFileList(offset, maxOffset, fileArray, currentIndex):
     
     LCD.fill(LCD.WHITE)
 
-    if len(fileArray) == 0:
-        printText("no files found", 8, 8, False)
+    if len(fileArray) == 1:
+        if fileArray[0] == "no files found":
+            printText("no files found", 8, 8, False)
+            return
     
     if currentIndex >= len(fileArray):
         currentIndex = len(fileArray) - 1
@@ -432,6 +442,33 @@ def playWAV():
     except KeyboardInterrupt:
         stopWAV()
     
+def inSubDirectory():
+    pwd = os.getcwd()
+
+    if pwd.rfind('/') > 0:
+        return True
+    else:
+        return False
+
+def moveUpDirectory():
+    global currentPath
+    global shouldReloadFiles
+    
+    if inSubDirectory() == False:
+        return False
+    
+#     findLastPathElement = currentPath.rfind('/')
+# 
+#     currentPath = currentPath[0:findLastPathElement]
+# 
+#     print(currentPath)
+
+    os.chdir("..")
+
+    shouldReloadFiles = True
+
+    return True
+
 def processButtons():
     global upButton
     global downButton
@@ -443,10 +480,11 @@ def processButtons():
     global currentFile
     global hasDisplayedWave
     global selectDeBounce
+    global backButtonDeBounce
     global playMode
 
     if shouldReloadFiles:
-        return
+        return False
 
     if upButton.value() == 0:
         if currentScreen == 0:
@@ -466,22 +504,28 @@ def processButtons():
                     currentMode = 0
                     currentScreen = 1
                 else:
-                    print("Directory Changed")
                     return changeDirectory(currentFile)
             elif currentScreen == 1:
                 if currentMode == 0 and hasDisplayedWave:
                     playWAV()
     elif backButton.value() == 0:
-        if currentScreen == 1:
-            if playMode == 0 or playMode == 2:
-                currentScreen = 0
-                return True
-            else:
-                stopWAV()
-                playMode = 0
+        if backButtonDeBounce == False:
+            backButtonDeBounce = True
+            if currentScreen == 1:
+                if playMode == 0 or playMode == 2:
+                    currentScreen = 0
+                    return True
+                else:
+                    stopWAV()
+                    playMode = 0
+            elif currentScreen == 0 and inSubDirectory():
+                return moveUpDirectory()
 
     if selectButton.value() == 1:
         selectDeBounce = False
+
+    if backButton.value() == 1:
+        backButtonDeBounce = False
 
     return False
 
@@ -567,6 +611,8 @@ if __name__=='__main__':
 
     hasSDCard = sdcardInit()
     
+    os.chdir("/" + DEFPATH)
+    
     if IS_DEMO:
         DEFPATH = ""
         hasSDCard = True
@@ -574,7 +620,7 @@ if __name__=='__main__':
     currentPath = DEFPATH
     
     if hasSDCard:
-        get_config_default(DEFPATH+"/config")
+        get_config_default("config")
         shouldReloadFiles = True
      
     #TODO: Whilst testing comment this out so the player can initialise at the top of the app
@@ -606,9 +652,9 @@ if __name__=='__main__':
         while True:
             shouldDisplayFiles = processButtons()
             if shouldReloadFiles:
+                shouldReloadFiles = False
                 print("Loading Files")
                 loadFileList(currentPath)
-                shouldReloadFiles = False
                 shouldDisplayFiles = True
                 
             if hasSDCard == False:
@@ -619,7 +665,8 @@ if __name__=='__main__':
                     LCD.show()
                     time.sleep(2)
                 else:
-                    get_config_default(DEFPATH+"/config")
+                    os.chdir("/" + DEFPATH)
+                    get_config_default("config")
                     shouldReloadFiles = True
                     currentScreen = 0
             elif currentScreen == 0:
@@ -643,8 +690,8 @@ if __name__=='__main__':
                     loadWAV(fileArray[currentIndex])
                     hasDisplayedWave = True
     except KeyboardInterrupt:
-        stopWAV()
         print("wave player terminated")
+        stopWAV()
 
 
 
