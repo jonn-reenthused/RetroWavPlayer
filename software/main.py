@@ -11,6 +11,10 @@ import machine
 # Retro Wave Player
 # 2023 RE:Enthused
 
+VERSION="0.1a"
+
+# CONFIGURATION
+# IS_DEMO will look for WAV files on the internal Pico memory if set to True
 IS_DEMO = False
 DEFPATH="sd"
 BL = 13
@@ -30,13 +34,13 @@ BACKIO = 4
 AUDIOLEFT = 20
 AUDIORIGHT = 21
 AUDIOGND = 22
-VERSION="0.1a"
 
 upButton = ""
 downButton = ""
 selectButton = ""
 backButton = ""
 
+# GLOBALS
 fileArray = []
 currentScreen = 0
 currentFile = ""
@@ -46,10 +50,11 @@ currentPath = ""
 currentPerc = 0
 fileSeconds = 0.0
 hasSDCard = False
-player = None
+player = wavePlayer() #None
 currentMode = 0
 selectDeBounce = False
 backDeBounce = False
+shouldReloadFiles = True
 
 SCREEN_WIDTH = 160
 SCREEN_HEIGHT = 128
@@ -227,24 +232,56 @@ def is_hidden(file):
     return file.startswith('.')
 
 def loadFileList(waveFolder):
+    global currentIndex
+    
+    currentIndex = 0
     fileArray.clear()
 
     # get a list of .wav files
-    for k in os.ilistdir(waveFolder):
+    files = os.ilistdir(waveFolder)
+    
+    for k in files:
         i = k[0]
+        print(i)
         if is_hidden(i) == False:
             if k[1] & 0x4000: # Directory
                 fileArray.append("[DIR] "+i)
             elif i.upper().find(".WAV") >= 0 and is_hidden(i) == False:
                 fileArray.append(i)
 
+    fileArray.sort()
+
+def changeDirectory(directoryName):
+    global currentPath
+    global currentScreen
+    global shouldReloadFiles
+    
+    directory = directoryName[5:].strip()
+    currentPath = currentPath+ "/" + directory
+    print(currentPath)
+    
+    shouldReloadFiles = True
+    
+    return True
+
+def checkSelection(filename):
+    # Check we aren't loading a directory
+    if filename[0:5] == "[DIR]":
+        return False
+    else:
+        return True
+
 def loadWAV(filename):
     global fileSeconds
-    f = wave.open(filename,'rb')
-    
-    fileSeconds = (f.getnframes() / f.getframerate())
-
-    f.close()
+    global playMode
+        
+    try:
+        f = wave.open(filename,'rb')
+        fileSeconds = (f.getnframes() / f.getframerate())
+        f.close()
+    except:
+        playMode = 2
+        showWavStatus()
 
 def showWavStatus():
     global playMode
@@ -260,6 +297,9 @@ def showWavStatus():
     elif playMode == 1:
         statusText = "PLAYING"
         statusColour = LCD.GREEN
+    elif playMode == 2:
+        statusText = "ERROR"
+        statusColour = LCD.RED
     else:
         statusText = "STOPPED"
         statusColour = LCD.RED
@@ -374,6 +414,10 @@ def playWAV():
     global hasDisplayedWave
     global currentFile
     global playMode
+    global player
+    
+    if playMode == 2:
+        return
     
     if hasDisplayedWave == False:
         return
@@ -401,6 +445,9 @@ def processButtons():
     global selectDeBounce
     global playMode
 
+    if shouldReloadFiles:
+        return
+
     if upButton.value() == 0:
         if currentScreen == 0:
             currentIndex = currentIndex - 1
@@ -414,15 +461,19 @@ def processButtons():
             selectDeBounce = True
             if currentScreen == 0:
                 currentFile = fileArray[currentIndex]
-                hasDisplayedWave = False
-                currentMode = 0
-                currentScreen = 1
+                if checkSelection(currentFile) == True:
+                    hasDisplayedWave = False
+                    currentMode = 0
+                    currentScreen = 1
+                else:
+                    print("Directory Changed")
+                    return changeDirectory(currentFile)
             elif currentScreen == 1:
                 if currentMode == 0 and hasDisplayedWave:
                     playWAV()
     elif backButton.value() == 0:
         if currentScreen == 1:
-            if playMode == 0:
+            if playMode == 0 or playMode == 2:
                 currentScreen = 0
                 return True
             else:
@@ -525,8 +576,9 @@ if __name__=='__main__':
     if hasSDCard:
         get_config_default(DEFPATH+"/config")
         shouldReloadFiles = True
-        
-    player = wavePlayer(leftPin=Pin(AUDIOLEFT),rightPin=Pin(AUDIORIGHT), virtualGndPin=Pin(AUDIOGND))
+     
+    #TODO: Whilst testing comment this out so the player can initialise at the top of the app
+    #player = wavePlayer(leftPin=Pin(AUDIOLEFT),rightPin=Pin(AUDIORIGHT), virtualGndPin=Pin(AUDIOGND))
     
     pwm = PWM(Pin(BL))
     pwm.freq(1000)
@@ -554,6 +606,7 @@ if __name__=='__main__':
         while True:
             shouldDisplayFiles = processButtons()
             if shouldReloadFiles:
+                print("Loading Files")
                 loadFileList(currentPath)
                 shouldReloadFiles = False
                 shouldDisplayFiles = True
