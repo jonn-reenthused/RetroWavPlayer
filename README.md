@@ -1,4 +1,7 @@
 # RetroWavPlayer
+
+WORK IN PROGRESS - DO NOT USE UNLESS YOU WANT TO DEBUG HARDWARE AND SOFTWARE
+
 A wav player using a Raspberry Pico for retro computers
 
 This is a simple device that allows selection and playing of WAV files from a headphone port. This is useful for older computers where the software hasn't been encoded into a format that devices like the Casduino can't play.
