@@ -1,4 +1,4 @@
-from machine import Pin,SPI,PWM
+from machine import Pin,SPI,PWM,Timer
 import framebuf
 import time
 import os
@@ -16,6 +16,7 @@ VERSION="0.1a"
 # CONFIGURATION
 # IS_DEMO will look for WAV files on the internal Pico memory if set to True
 IS_DEMO = False
+SHOW_DIR = False
 DEFPATH="sd"
 BL = 13
 DC = 8
@@ -34,11 +35,14 @@ BACKIO = 4
 AUDIOLEFT = 20
 AUDIORIGHT = 21
 AUDIOGND = 22
+MOTORCONTROL = 26
+MOTORCONTROLENABLE = True
 
-upButton = ""
-downButton = ""
-selectButton = ""
-backButton = ""
+upButton = None
+downButton = None
+selectButton = None
+backButton = None
+motorControlPin = None
 
 # GLOBALS
 fileArray = []
@@ -56,9 +60,13 @@ selectDeBounce = False
 backDeBounce = False
 shouldReloadFiles = True
 
+progressTimer = None #Timer(1, mode=Timer.PERIODIC, width=32)
+progressTimer_a = None #progressTimer.channel(Timer.A | Timer.B, freq=1)   # 1 Hz frequency requires a 32 bit timer
+
 SCREEN_WIDTH = 160
 SCREEN_HEIGHT = 128
 
+# DISPLAY
 class LCD_1inch8(framebuf.FrameBuffer):
     def __init__(self):
         self.width = 160
@@ -228,69 +236,6 @@ class LCD_1inch8(framebuf.FrameBuffer):
         self.spi.write(self.buffer)
         self.cs(1)
 
-def is_hidden(file):
-    return file.startswith('.')
-
-def loadFileList(waveFolder):
-    global currentIndex
-    
-    currentIndex = 0
-    fileArray.clear()
-
-    # get a list of .wav files
-    files = os.ilistdir()
-    
-    for k in files:
-        i = k[0]
-        if is_hidden(i) == False:
-            if k[1] & 0x4000: # Directory
-                fileArray.append(".[DIR] "+i)
-            elif i.upper().find(".WAV") >= 0 and is_hidden(i) == False:
-                fileArray.append(i)
-
-    fileArray.sort()
-    
-    if len(fileArray) == 0:
-        fileArray.append("no files found")
-
-def changeDirectory(directoryName):
-    global currentPath
-    global currentScreen
-    global shouldReloadFiles
-    
-    directory = directoryName[6:].strip()
-    currentPath = currentPath+ "/" + directory
-    
-    os.chdir(directory)
-    
-    shouldReloadFiles = True
-    
-    return True
-
-def checkSelection(filename):
-    # Check we aren't loading a directory
-    if filename[0:6] == ".[DIR]":
-        return False
-    else:
-        return True
-
-def loadWAV(filename):
-    global fileSeconds
-    global playMode
-        
-    try:
-        print(filename)
-        fp = open(filename, 'rb')
-        
-        f = wave.open(fp,'rb')
-        fileSeconds = (f.getnframes() / f.getframerate())
-        f.close()
-        playMode = 0
-    except Exception as error:
-        playMode = 2
-        showWavStatus()
-        print(error)
-
 def showWavStatus():
     global playMode
     
@@ -300,16 +245,16 @@ def showWavStatus():
     statusText = ""
     statusColour = LCD.GREEN
     if playMode == 0:
-        statusText = "PAUSED"
+        statusText = "STOPPED"
         statusColour = LCD.BLUE
     elif playMode == 1:
         statusText = "PLAYING"
         statusColour = LCD.GREEN
-    elif playMode == 2:
+    elif playMode == 3:
         statusText = "ERROR"
         statusColour = LCD.RED
     else:
-        statusText = "STOPPED"
+        statusText = "PAUSED"
         statusColour = LCD.RED
         
     putText(statusText, 60, 4, statusColour)
@@ -317,18 +262,23 @@ def showWavStatus():
     # Filename
     putText(currentFile, 8, 20, LCD.BLACK)
     putText("{0:.2f} seconds".format(fileSeconds), 40, 40, LCD.BLACK)
-
-    
-    # Progress Bar
-    #segment = int((SCREEN_WIDTH / 10) - 2)
-    
-    #LCD.rect(4, SCREEN_HEIGHT - (segment + 6), SCREEN_WIDTH - 7, segment + 4, LCD.BLUE)
-    
-    #for i in range(0, currentPerc):
-    #    LCD.fill_rect((i * (segment + 1)) + 6, SCREEN_HEIGHT - (segment + 4), segment, segment, LCD.BLUE)
     
     LCD.show()
 
+def progressUpdate(timer):
+    global player
+    
+    # Progress Bar
+    segment = int((SCREEN_WIDTH / 10) - 2)
+    
+    LCD.rect(4, SCREEN_HEIGHT - (segment + 6), SCREEN_WIDTH - 7, segment + 4, LCD.BLUE)
+    
+    currentPerc = player.progress() / 10
+    
+    for i in range(0, currentPerc):
+        LCD.fill_rect((i * (segment + 1)) + 6, SCREEN_HEIGHT - (segment + 4), segment, segment, LCD.BLUE)
+        
+    LCD.show()
 
 def putText(text, x, y, colour):
     LCD.text(text, x, y, colour)
@@ -349,6 +299,54 @@ def showIntro():
     putText("Finding Files",8,70,LCD.RED) 
     LCD.show()
     time.sleep(2)
+
+# FILE HANDLING
+def is_hidden(file):
+    return file.startswith('.')
+
+def loadFileList(waveFolder):
+    global currentIndex
+    
+    currentIndex = 0
+    fileArray.clear()
+
+    # get a list of .wav files
+    files = os.ilistdir()
+    
+    for k in files:
+        i = k[0]
+        if is_hidden(i) == False:
+            if k[1] & 0x4000: # Directory
+                if SHOW_DIR:
+                    fileArray.append(".[DIR] "+i)
+            elif i.upper().find(".WAV") >= 0 and is_hidden(i) == False:
+                fileArray.append(i)
+
+    fileArray.sort()
+    
+    if len(fileArray) == 0:
+        fileArray.append("no files found")
+
+def changeDirectory(directoryName):
+    global currentPath
+    global currentScreen
+    global shouldReloadFiles
+    
+    directory = directoryName[6:].strip()
+#     currentPath = currentPath+ "/" + directory
+    
+    os.chdir(directory)
+    
+    shouldReloadFiles = True
+    
+    return True
+
+def checkSelection(filename):
+    # Check we aren't loading a directory
+    if filename[0:6] == ".[DIR]":
+        return False
+    else:
+        return True
 
 def sdcardInit():
     hasSucceeded = False
@@ -413,35 +411,6 @@ def displayFileList(offset, maxOffset, fileArray, currentIndex):
             
         index = index + 1
 
-def stopWAV():
-    global playMode
-    
-    if playMode == 1:
-        player.stop()
-        playMode = 0
-
-def playWAV():
-    global hasDisplayedWave
-    global currentFile
-    global playMode
-    global player
-    
-    if playMode == 2:
-        return
-    
-    if hasDisplayedWave == False:
-        return
-    
-    playMode = 1
-    showWavStatus()
-    time.sleep(1)
-    
-    try:
-        player.play(currentFile)
-        stopWAV()
-    except KeyboardInterrupt:
-        stopWAV()
-    
 def inSubDirectory():
     pwd = os.getcwd()
 
@@ -457,18 +426,65 @@ def moveUpDirectory():
     if inSubDirectory() == False:
         return False
     
-#     findLastPathElement = currentPath.rfind('/')
-# 
-#     currentPath = currentPath[0:findLastPathElement]
-# 
-#     print(currentPath)
-
     os.chdir("..")
 
     shouldReloadFiles = True
 
     return True
 
+# OPERATIONS
+def loadWAV(filename):
+    global fileSeconds
+    global playMode
+        
+    try:
+        print(filename)
+        fp = open(filename, 'rb')
+        
+        f = wave.open(fp,'rb')
+        fileSeconds = (f.getnframes() / f.getframerate())
+        f.close()
+        playMode = 0
+    except Exception as error:
+        playMode = 3
+        showWavStatus()
+        print(error)
+
+def stopWAV():
+    global playMode
+    global progressTimer
+    
+    if playMode == 1:
+        progressTimer.deinit()
+        player.stop()
+        playMode = 0
+
+def playWAV():
+    global hasDisplayedWave
+    global currentFile
+    global playMode
+    global player
+    global progressTimer
+    global progressTimer_a
+    
+    if playMode == 3:
+        return
+    
+    if hasDisplayedWave == False:
+        return
+    
+    playMode = 1
+    showWavStatus()
+    
+    try:
+        #init timer
+        progressTimer = Timer(period=1000, mode=Timer.PERIODIC, callback=progressUpdate)
+        
+        player.play(currentFile)
+        stopWAV()
+    except KeyboardInterrupt:
+        stopWAV()
+    
 def processButtons():
     global upButton
     global downButton
@@ -512,9 +528,11 @@ def processButtons():
         if backButtonDeBounce == False:
             backButtonDeBounce = True
             if currentScreen == 1:
-                if playMode == 0 or playMode == 2:
+                if playMode == 0 or playMode == 3:
                     currentScreen = 0
                     return True
+                elif playMode == 2:
+                    pauseWav()
                 else:
                     stopWAV()
                     playMode = 0
@@ -544,10 +562,11 @@ def get_config_default(file):
     global DOWNIO
     global SELECTIO
     global BACKIO
-    global AUDIOLEFT
-    global AUDIORIGHT
-    global AUDIOGND
-    global currentScreen
+#     global AUDIOLEFT
+#     global AUDIORIGHT
+#     global AUDIOGND
+    global MOTORCONTROL
+    global MOTORCONTROLENABLE
     
     try:
         with open(file) as fd:
@@ -567,9 +586,11 @@ def get_config_default(file):
             DOWNIO = config["DOWN_PIN"]
             SELECTIO = config["SELECT_PIN"]
             BACKIO = config["BACK_PIN"]
-            AUDIOLEFT = config["AUDIO_LEFT_PIN"]
-            AUDIORIGHT = config["AUDIO_RIGHT_PIN"]
-            AUDIOGND = config["AUDIO_GND_PIN"]
+#             AUDIOLEFT = config["AUDIO_LEFT_PIN"]
+#             AUDIORIGHT = config["AUDIO_RIGHT_PIN"]
+#             AUDIOGND = config["AUDIO_GND_PIN"]
+            MOTORCONTROL = config["MOTOR_CONTROL_PIN"]
+            MOTORCONTROLENABLE = config["MOTOR_CONTROL_ENABLE"]
         
     except OSError:
         with open(file, "w") as fd:
@@ -588,9 +609,11 @@ def get_config_default(file):
                 "DOWN_PIN": DOWNIO,
                 "SELECT_PIN": SELECTIO,
                 "BACK_PIN": BACKIO,
-                "AUDIO_LEFT_PIN": AUDIOLEFT,
-                "AUDIO_RIGHT_PIN": AUDIORIGHT,
-                "AUDIO_GND_PIN": AUDIOGND,
+#                 "AUDIO_LEFT_PIN": AUDIOLEFT,
+#                 "AUDIO_RIGHT_PIN": AUDIORIGHT,
+#                 "AUDIO_GND_PIN": AUDIOGND,
+                "MOTOR_CONTROL_PIN": MOTORCONTROL,
+                "MOTOR_CONTROL_ENABLE": MOTORCONTROLENABLE,
             }
             json.dump(config, fd)
             return config
@@ -599,9 +622,68 @@ def processBackButton(pin):
     global playMode
     global currentScreen
     
+    print("Back Button")
+    
     if currentScreen == 1:
-        if playMode == 1:
+        if playMode == 2:
             stopWAV()
+        elif playMode == 1:
+            pauseWAV()
+
+def setupControls():
+    global upButton
+    global UPIO
+    global downButton
+    global DOWNIO
+    global SELECTIO
+    global selectButton
+    global backButton
+    global BACKIO
+    global motorControlPin
+    global MOTORCONTROL
+    
+    upButton = Pin(UPIO, mode=Pin.IN, pull=Pin.PULL_UP)
+    downButton = Pin(DOWNIO, mode=Pin.IN, pull=Pin.PULL_UP)
+    selectButton = Pin(SELECTIO, mode=Pin.IN, pull=Pin.PULL_UP)
+    backButton = Pin(BACKIO, mode=Pin.IN, pull=Pin.PULL_UP)
+    motorControlPin = Pin(MOTORCONTROL, mode=Pin.IN, pull=Pin.PULL_UP)
+
+    backButton.irq(trigger=Pin.IRQ_FALLING, handler=processBackButton)
+    
+    if MOTORCONTROLENABLE:
+        motorControlPin.irq(trigger=Pin.IRQ_FALLING, handler=processMotorControl)
+    
+def pauseWAV():
+    global playMode
+    global player
+    print("Attempt to Pause")
+    
+    player.pause()
+    playMode = 2
+    showWavStatus()
+
+def resumeWAV():
+    global playMode
+    global player
+    
+    player.resume()
+    playMode = 1
+    showWavStatus()
+
+def processMotorControl(pin):
+    global playMode
+    global currentScreen
+        
+    motorStatus = pin.value()
+    print("processMotorControl: " + str(motorStatus))   
+    
+    if currentScreen == 1:
+        if playMode == 1 and motorStatus == 0:
+            pauseWAV()
+        elif playMode == 2 and motorStatus == 1:
+            resumeWAV()
+        elif playMode == 0 and motorStatus == 1:
+            playWAV()
 
 if __name__=='__main__':
     # Initialise Starting Conditions
@@ -621,11 +703,9 @@ if __name__=='__main__':
     
     if hasSDCard:
         get_config_default("config")
+        setupControls()
         shouldReloadFiles = True
      
-    #TODO: Whilst testing comment this out so the player can initialise at the top of the app
-    #player = wavePlayer(leftPin=Pin(AUDIOLEFT),rightPin=Pin(AUDIORIGHT), virtualGndPin=Pin(AUDIOGND))
-    
     pwm = PWM(Pin(BL))
     pwm.freq(1000)
     pwm.duty_u16(32768)#max 65535
@@ -634,12 +714,6 @@ if __name__=='__main__':
     offset = 0
     maxOffset = 6
 
-    upButton = Pin(UPIO, mode=Pin.IN, pull=Pin.PULL_UP)
-    downButton = Pin(DOWNIO, mode=Pin.IN, pull=Pin.PULL_UP)
-    selectButton = Pin(SELECTIO, mode=Pin.IN, pull=Pin.PULL_UP)
-    backButton = Pin(BACKIO, mode=Pin.IN, pull=Pin.PULL_UP)
-
-    backButton.irq(trigger=Pin.IRQ_FALLING, handler=processBackButton)
 
     LCD = LCD_1inch8()
     #color BRG
@@ -667,6 +741,7 @@ if __name__=='__main__':
                 else:
                     os.chdir("/" + DEFPATH)
                     get_config_default("config")
+                    setupControls()
                     shouldReloadFiles = True
                     currentScreen = 0
             elif currentScreen == 0:

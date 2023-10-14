@@ -73,6 +73,7 @@ import uctypes
 from myDMA import myDMA
 from myPWM import myPWM
 from machine import Pin
+import time
 
 #r0 buffer address
 #r1 number of word to do
@@ -139,13 +140,12 @@ def interleavebytes(r0,r1,r2):
     bgt(loop)
 
 
-class wavePlayer:
-    global progressValue
-    
+class wavePlayer:    
     def __init__(self,leftPin=Pin(2),rightPin=Pin(3), virtualGndPin=Pin(4),
                  dma0Channel=10,dma1Channel=11,dmaTimer=3,pwmBits=10):
         #left channel Pin needs to be an even GPIO Pin number
         #right channel Pin needs to be left channel + 1
+        self.isPaused = False
         self.pwmBits=pwmBits
         self.PWM_DIVIDER = 1
         if self.pwmBits == 10:
@@ -159,6 +159,7 @@ class wavePlayer:
         self.leftPin=leftPin
         self.rightPin=rightPin
         self.virtualGndPin=virtualGndPin
+        self.progressValue = 0
 
         # set PWM
         self.leftPWM=myPWM(leftPin,divider=self.PWM_DIVIDER,top=self.PWM_TOP)
@@ -175,17 +176,28 @@ class wavePlayer:
         self.dma1Channel = dma1Channel
         self.dmaTimer = dmaTimer
 
-    def progress():
-        return progressValue
+    def progress(self):
+        return self.progressValue
 
     def stop(self):
         self.dma0.abort()
         self.dma1.abort()
 
+    def pause(self):
+        print("Paused called")
+        self.isPaused = True
+
+    def resume(self):
+        self.isPaused = False
+
     def play(self,filename):
         # open Audio file and get information
 
-        f = wave.open(filename,'rb')
+        try:
+            f = wave.open(filename,'rb')
+        except Exception as error:
+            raise
+            return
 
         rate = f.getframerate()
         bytesDepth = f.getsampwidth()
@@ -221,6 +233,11 @@ class wavePlayer:
         frameLeft = frameCount
 
         while frameLeft>0:
+            self.progressValue = 100 - int((frameLeft / frameCount) * 100)
+            print(self.progressValue)
+            while self.isPaused:
+                print("Paused")
+                time.sleep(1)
          # first DMA
             if frameLeft < nbFrame:
                 nbFrame = frameLeft
